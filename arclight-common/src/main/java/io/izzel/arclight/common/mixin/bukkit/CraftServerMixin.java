@@ -1,5 +1,6 @@
 package io.izzel.arclight.common.mixin.bukkit;
 
+import com.google.common.collect.Lists;
 import io.izzel.arclight.common.bridge.bukkit.CraftServerBridge;
 import jline.console.ConsoleReader;
 import net.minecraft.server.dedicated.DedicatedPlayerList;
@@ -11,6 +12,7 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.craftbukkit.v.CraftServer;
 import org.bukkit.craftbukkit.v.command.CraftCommandMap;
+import org.bukkit.craftbukkit.v.entity.CraftPlayer;
 import org.bukkit.craftbukkit.v.help.SimpleHelpMap;
 import org.bukkit.craftbukkit.v.scheduler.CraftScheduler;
 import org.bukkit.event.server.ServerLoadEvent;
@@ -119,6 +121,15 @@ public abstract class CraftServerMixin implements CraftServerBridge {
             return;
         }
         this.worlds.remove(world.bridge$getWorld().getName().toLowerCase(Locale.ROOT));
+    }
+
+    /**
+     * @author NahuLD
+     * @reason
+     */
+    @Overwrite(remap = false)
+    public List<CraftPlayer> getOnlinePlayers() {
+        return Lists.transform(this.playerList.players, serverPlayer -> (CraftPlayer) serverPlayer.bridge$getBukkitEntity());
     }
 
     /**

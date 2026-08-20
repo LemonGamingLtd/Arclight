@@ -1,8 +1,8 @@
 package io.izzel.arclight.common.mixin.core.server.level;
 
-import io.izzel.arclight.common.bridge.core.world.chunk.ChunkBridge;
+import io.izzel.arclight.common.bridge.core.world.level.chunk.LevelChunkBridge;
 import io.izzel.arclight.common.bridge.core.world.server.ChunkHolderBridge;
-import io.izzel.arclight.common.bridge.core.world.server.ChunkMapBridge;
+import io.izzel.arclight.common.bridge.core.server.level.ChunkMapBridge;
 import io.izzel.arclight.common.mod.server.ArclightServer;
 import it.unimi.dsi.fastutil.shorts.ShortSet;
 import net.minecraft.core.BlockPos;
@@ -32,7 +32,8 @@ public abstract class ChunkHolderMixin extends GenerationChunkHolder implements 
     @Shadow @Final private ShortSet[] changedBlocksPerSection;
     @Shadow @Final private LevelHeightAccessor levelHeightAccessor;
     @Shadow private int ticketLevel;
-    @Shadow public abstract CompletableFuture<ChunkResult<LevelChunk>> getFullChunkFuture();@Override @Accessor("oldTicketLevel") public abstract int bridge$getOldTicketLevel();
+    @Shadow public abstract CompletableFuture<ChunkResult<LevelChunk>> getFullChunkFuture();
+    @Override @Accessor("oldTicketLevel") public abstract int bridge$getOldTicketLevel();
     // @formatter:on
 
     @Unique
@@ -84,7 +85,7 @@ public abstract class ChunkHolderMixin extends GenerationChunkHolder implements 
                         // lists again inside the chunk once the chunk becomes inaccessible and set the chunk's needsSaving flag.
                         // These actions may however happen deferred, so we manually set the needsSaving flag already here.
                         chunk.setUnsaved(true);
-                        ((ChunkBridge)chunk).bridge$unloadCallback();
+                        ((LevelChunkBridge)chunk).bridge$unloadCallback();
                     });
                 }
             }).exceptionally((throwable) -> {
@@ -119,11 +120,10 @@ public abstract class ChunkHolderMixin extends GenerationChunkHolder implements 
         if (!fullChunkStatus.isOrAfter(FullChunkStatus.FULL) && fullChunkStatus2.isOrAfter(FullChunkStatus.FULL)) {
             this.getFullChunkFuture().thenAccept((either) -> {
                 LevelChunk chunk = either.orElse(null);
-                if (chunk != null) {
-                    ((ChunkMapBridge) chunkManager).bridge$getCallbackExecutor().execute(
-                            ((ChunkBridge) chunk)::bridge$loadCallback
-                    );
-                }
+                if (chunk == null) return;
+                ((ChunkMapBridge) chunkManager).bridge$getCallbackExecutor().execute(
+                        ((LevelChunkBridge) chunk)::bridge$loadCallback
+                );
             }).exceptionally((throwable) -> {
                 // ensure exceptions are printed, by default this is not the case
                 ArclightServer.LOGGER.fatal("Failed to schedule load callback for chunk " + this.pos, throwable);

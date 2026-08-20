@@ -1,11 +1,10 @@
 package io.izzel.arclight.common.mixin.core.server.level;
 
-import io.izzel.arclight.common.bridge.core.world.WorldBridge;
+import io.izzel.arclight.common.bridge.core.world.level.WorldBridge;
 import io.izzel.arclight.common.bridge.core.world.server.ChunkHolderBridge;
-import io.izzel.arclight.common.bridge.core.world.server.ChunkMapBridge;
-import io.izzel.arclight.common.bridge.core.world.server.ServerChunkProviderBridge;
-import io.izzel.arclight.common.bridge.core.world.server.TicketManagerBridge;
-import io.izzel.arclight.mixin.Decorate;
+import io.izzel.arclight.common.bridge.core.server.level.ChunkMapBridge;
+import io.izzel.arclight.common.bridge.core.world.server.ServerChunkCacheBridge;
+import io.izzel.arclight.common.bridge.core.server.level.DistanceManagerBridge;
 import net.minecraft.server.level.*;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.GameRules;
@@ -23,7 +22,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 @Mixin(ServerChunkCache.class)
-public abstract class ServerChunkCacheMixin implements ServerChunkProviderBridge {
+public abstract class ServerChunkCacheMixin implements ServerChunkCacheBridge {
 
     // @formatter:off
     @Shadow public abstract void save(boolean flush);
@@ -49,11 +48,6 @@ public abstract class ServerChunkCacheMixin implements ServerChunkProviderBridge
             return null;
         }
         return ((ChunkHolderBridge) chunk).bridge$getFullChunkUnchecked();
-    }
-
-    @Override
-    public boolean bridge$isChunkLoaded(int x, int z) {
-        return isChunkLoaded(x, z);
     }
 
     @Override
@@ -104,22 +98,12 @@ public abstract class ServerChunkCacheMixin implements ServerChunkProviderBridge
 
     public void purgeUnload() {
         this.level.getProfiler().push("purge");
-        ((TicketManagerBridge) this.distanceManager).bridge$tick();
+        ((DistanceManagerBridge) this.distanceManager).bridge$tick();
         this.bridge$tickDistanceManager();
         this.level.getProfiler().popPush("unload");
         ((ChunkMapBridge) this.chunkMap).bridge$tick(() -> true);
         this.level.getProfiler().pop();
         this.clearCache();
-    }
-
-    @Override
-    public void bridge$close(boolean save) throws IOException {
-        this.close(save);
-    }
-
-    @Override
-    public void bridge$purgeUnload() {
-        this.purgeUnload();
     }
 
     @Redirect(method = "chunkAbsent", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ChunkHolder;getTicketLevel()I"), require = 0)

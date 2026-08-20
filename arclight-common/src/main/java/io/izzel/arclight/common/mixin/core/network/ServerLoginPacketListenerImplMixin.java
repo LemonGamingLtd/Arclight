@@ -5,7 +5,7 @@ import com.mojang.authlib.exceptions.AuthenticationException;
 import com.mojang.authlib.properties.Property;
 import io.izzel.arclight.common.bridge.core.network.NetworkManagerBridge;
 import io.izzel.arclight.common.bridge.core.network.common.ServerCommonPacketListenerBridge;
-import io.izzel.arclight.common.bridge.core.network.login.ServerLoginNetHandlerBridge;
+import io.izzel.arclight.common.bridge.core.network.login.ServerLoginPacketListenerBridge;
 import io.izzel.arclight.common.bridge.core.server.MinecraftServerBridge;
 import io.izzel.arclight.common.bridge.core.server.management.PlayerListBridge;
 import io.izzel.arclight.common.mod.util.VelocitySupport;
@@ -67,7 +67,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Mixin(ServerLoginPacketListenerImpl.class)
-public abstract class ServerLoginPacketListenerImplMixin implements ServerLoginNetHandlerBridge, CraftPlayer.TransferCookieConnection {
+public abstract class ServerLoginPacketListenerImplMixin implements ServerLoginPacketListenerBridge, CraftPlayer.TransferCookieConnection {
 
     // @formatter:off
     @Shadow private ServerLoginPacketListenerImpl.State state;
@@ -275,9 +275,15 @@ public abstract class ServerLoginPacketListenerImplMixin implements ServerLoginN
             disconnect("This server requires you to connect with Velocity.");
             return;
         }
-        String playerName = gameProfile.getName();
+        callPlayerPreLoginEvents(gameProfile);
+        LOGGER.info("UUID of player {} is {}", gameProfile.getName(), gameProfile.getId());
+        this.startClientVerification(gameProfile);
+    }
+
+    private void callPlayerPreLoginEvents(GameProfile profile) throws Exception {
+        String playerName = profile.getName();
         InetAddress address = ((InetSocketAddress) connection.getRemoteAddress()).getAddress();
-        UUID uniqueId = gameProfile.getId();
+        UUID uniqueId = profile.getId();
         CraftServer craftServer = (CraftServer) Bukkit.getServer();
         AsyncPlayerPreLoginEvent asyncEvent = new AsyncPlayerPreLoginEvent(playerName, address, uniqueId);
         craftServer.getPluginManager().callEvent(asyncEvent);
@@ -298,20 +304,30 @@ public abstract class ServerLoginPacketListenerImplMixin implements ServerLoginN
             ((MinecraftServerBridge) server).bridge$queuedProcess(waitable);
             if (waitable.get() != PlayerPreLoginEvent.Result.ALLOWED) {
                 disconnect(event.getKickMessage());
-                return;
             }
         } else if (asyncEvent.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) {
             disconnect(asyncEvent.getKickMessage());
-            return;
         }
-        LOGGER.info("UUID of player {} is {}", gameProfile.getName(), gameProfile.getId());
-        this.startClientVerification(gameProfile);
     }
 
-    @Inject(method = "handleCustomQueryPacket", cancellable = true, at = @At("HEAD"))
+    /*
+     * Forgified Fabric API (FFAPI) will actively record every custom query and awaits all responses
+     * before we enter the configuration stage. Due to their powerful control on queries we must allow
+     * them to at least have a glance on what they receive.
+     * FFAPI selected its injection point at the HEAD of this method. Thus, we selected INVOKE disconnect
+     * to ensure a defined injection order.
+     * Due to lack of support on custom queries in Forge/NF, FFAPI aggressively deserialize all CustomQA
+     * payload into its own kind; it is thus needed to take special care when processing the payload.
+     * Fallback implementation will log a loud warning and try to serialize the custom payload to recreate
+     * original answer data. This does not work for FFAPI since their payload is a buffer wrapper and has
+     * consumed the buffer by the end of their handler.
+     * See Forge/NF CustomQA deserialization & ArclightCustomQueryAnswerPayload.
+     * See FFAPI compat impl for customQAData & onCustomQA.
+     */
+    @Inject(method = "handleCustomQueryPacket", cancellable = true, at = @At(value = "INVOKE", target = "Lnet/minecraft/server/network/ServerLoginPacketListenerImpl;disconnect(Lnet/minecraft/network/chat/Component;)V"))
     private void arclight$modernForwardReply(ServerboundCustomQueryAnswerPacket packet, CallbackInfo ci) {
         if (VelocitySupport.isEnabled() && packet.transactionId() == this.bridge$getVelocityLoginId()) {
-            var payload = bridge$getDiscardedQueryAnswerData(packet);
+            var payload = arclight$platform$customQAData(packet);
             if (payload == null) {
                 this.bridge$disconnect("This server requires you to connect with Velocity.");
                 ci.cancel();
@@ -358,7 +374,7 @@ public abstract class ServerLoginPacketListenerImplMixin implements ServerLoginN
                     LOGGER.warn("Exception verifying {} ", this.authenticatedProfile.getName(), ex);
                 }
             });
-            this.bridge$platform$onCustomQuery(packet);
+            this.arclight$platform$onCustomQA(packet);
             ci.cancel();
         }
     }

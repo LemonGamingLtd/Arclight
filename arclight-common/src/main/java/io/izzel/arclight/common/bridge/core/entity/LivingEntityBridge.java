@@ -9,16 +9,16 @@ import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import org.bukkit.craftbukkit.v.entity.CraftLivingEntity;
+import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityKnockbackEvent;
 import org.bukkit.event.entity.EntityPotionEffectEvent;
 import org.bukkit.event.entity.EntityRegainHealthEvent;
 
-import java.util.Collection;
+import javax.annotation.Nullable;
 import java.util.Optional;
 
 public interface LivingEntityBridge extends EntityBridge {
@@ -73,13 +73,6 @@ public interface LivingEntityBridge extends EntityBridge {
         return true;
     }
 
-    void bridge$common$startCaptureDrops();
-
-    boolean bridge$common$isCapturingDrops();
-
-    void bridge$common$captureDrop(ItemEntity itemEntity);
-
-    Collection<ItemEntity> bridge$common$getCapturedDrops();
-
-    void bridge$common$finishCaptureAndFireEvent(DamageSource damageSource);
+    @Nullable
+    EntityDamageEvent arclight$fireEntityDamageEvent(DamageSource source, float original);
 }

@@ -1,5 +1,7 @@
 package io.izzel.arclight.neoforge.mod;
 
+import com.google.common.graph.Graph;
+import com.google.common.graph.Graphs;
 import cpw.mods.modlauncher.ClassTransformer;
 import cpw.mods.modlauncher.TransformingClassLoader;
 import io.izzel.arclight.api.Unsafe;
@@ -11,6 +13,7 @@ import org.objectweb.asm.ClassReader;
 import java.lang.invoke.MethodHandle;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Set;
 
 public class NeoForgeCommonImpl implements ArclightCommon.Api {
 
@@ -21,9 +24,9 @@ public class NeoForgeCommonImpl implements ArclightCommon.Api {
             ClassLoader classLoader = NeoForgeCommonImpl.class.getClassLoader();
             Field classTransformer = TransformingClassLoader.class.getDeclaredField("classTransformer");
             classTransformer.setAccessible(true);
-            ClassTransformer tranformer = (ClassTransformer) classTransformer.get(classLoader);
-            Method transform = tranformer.getClass().getDeclaredMethod("transform", byte[].class, String.class, String.class);
-            MH_TRANSFORM = Unsafe.lookup().unreflect(transform).bindTo(tranformer);
+            ClassTransformer transformer = (ClassTransformer) classTransformer.get(classLoader);
+            Method transform = transformer.getClass().getDeclaredMethod("transform", byte[].class, String.class, String.class);
+            MH_TRANSFORM = Unsafe.lookup().unreflect(transform).bindTo(transformer);
         } catch (Throwable t) {
             throw new IllegalStateException("Unknown modlauncher version", t);
         }
@@ -42,5 +45,10 @@ public class NeoForgeCommonImpl implements ArclightCommon.Api {
     @Override
     public boolean isModLoaded(String modid) {
         return ModList.get() != null ? ModList.get().isLoaded(modid) : FMLLoader.getLoadingModList().getModFileById(modid) != null;
+    }
+
+    @Override
+    public <T> Set<T> guavaReachableNodes(Graph<T> graph, T node) {
+        return Graphs.reachableNodes(graph, node);
     }
 }

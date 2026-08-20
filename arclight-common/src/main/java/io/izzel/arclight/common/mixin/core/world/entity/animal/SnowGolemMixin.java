@@ -1,9 +1,13 @@
 package io.izzel.arclight.common.mixin.core.world.entity.animal;
 
 import io.izzel.arclight.common.bridge.core.util.DamageSourcesBridge;
+import io.izzel.arclight.common.bridge.core.world.IWorldBridge;
+import io.izzel.arclight.common.mod.server.event.ArclightEventFactory;
+import io.izzel.arclight.mixin.Decorate;
+import io.izzel.arclight.mixin.DecorationOps;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.damagesource.DamageSources;
-import org.bukkit.craftbukkit.v.event.CraftEventFactory;
+import org.bukkit.craftbukkit.v.block.CraftBlockState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -24,9 +28,18 @@ public abstract class SnowGolemMixin extends PathfinderMobMixin {
         return ((DamageSourcesBridge) instance).bridge$melting();
     }
 
-    @Redirect(method = "aiStep", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;setBlockAndUpdate(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)Z"))
-    private boolean arclight$blockForm(Level world, BlockPos pos, BlockState state) {
-        return CraftEventFactory.handleBlockFormEvent(world, pos, state, (SnowGolem) (Object) this);
+    @Decorate(method = "aiStep", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/Level;setBlockAndUpdate(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;)Z"))
+    private boolean arclight$blockForm(Level world, BlockPos pos, BlockState newState) throws Throwable {
+        if (IWorldBridge.from(world) instanceof IWorldBridge bridge) {
+            final var event = ArclightEventFactory.callBlockFormEvent(bridge.bridge$getMinecraftWorld(), pos, newState, 3, (SnowGolem) (Object) this);
+            if (event != null) {
+                if (event.isCancelled()) {
+                    return false;
+                }
+                newState = ((CraftBlockState) event.getNewState()).getHandle();
+            }
+        }
+        return (boolean) DecorationOps.callsite().invoke(world, pos, newState);
     }
 
     @Inject(method = "shear", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/animal/SnowGolem;spawnAtLocation(Lnet/minecraft/world/item/ItemStack;F)Lnet/minecraft/world/entity/item/ItemEntity;"))

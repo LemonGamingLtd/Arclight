@@ -23,7 +23,6 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import javax.annotation.Nullable;
@@ -48,18 +47,18 @@ public abstract class PortalShapeMixin implements PortalSizeBridge {
         this.blocks = new BlockStateListPopulator(levelAccessor);
     }
 
-    @Redirect(method = "getDistanceUntilEdgeAboveFrame", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/state/BlockBehaviour$StatePredicate;test(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Z"))
-    private boolean arclight$captureBlock(BlockBehaviour.StatePredicate predicate, net.minecraft.world.level.block.state.BlockState p_test_1_, BlockGetter p_test_2_, BlockPos pos) {
-        boolean test = predicate.test(p_test_1_, p_test_2_, pos);
+    @Decorate(method = "getDistanceUntilEdgeAboveFrame", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/state/BlockBehaviour$StatePredicate;test(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Z"))
+    private boolean arclight$captureBlock(BlockBehaviour.StatePredicate predicate, net.minecraft.world.level.block.state.BlockState p_test_1_, BlockGetter p_test_2_, BlockPos pos) throws Throwable {
+        boolean test = (boolean) DecorationOps.callsite().invoke(predicate, p_test_1_, p_test_2_, pos);
         if (test) {
             blocks.setBlock(pos, this.level.getBlockState(pos), 18);
         }
         return test;
     }
 
-    @Redirect(method = "hasTopFrame", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/state/BlockBehaviour$StatePredicate;test(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Z"))
-    private boolean arclight$captureBlock2(BlockBehaviour.StatePredicate predicate, net.minecraft.world.level.block.state.BlockState p_test_1_, BlockGetter p_test_2_, BlockPos pos) {
-        boolean test = predicate.test(p_test_1_, p_test_2_, pos);
+    @Decorate(method = "hasTopFrame", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/block/state/BlockBehaviour$StatePredicate;test(Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/BlockGetter;Lnet/minecraft/core/BlockPos;)Z"))
+    private boolean arclight$captureBlock2(BlockBehaviour.StatePredicate predicate, net.minecraft.world.level.block.state.BlockState p_test_1_, BlockGetter p_test_2_, BlockPos pos) throws Throwable {
+        boolean test = (boolean) DecorationOps.callsite().invoke(predicate, p_test_1_, p_test_2_, pos);
         if (test) {
             blocks.setBlock(pos, this.level.getBlockState(pos), 18);
         }
@@ -80,16 +79,18 @@ public abstract class PortalShapeMixin implements PortalSizeBridge {
 
     @Inject(method = "createPortalBlocks", cancellable = true, at = @At("HEAD"))
     private void arclight$buildPortal(CallbackInfo ci) {
-        World world = ((IWorldBridge) this.level).bridge$getMinecraftWorld().bridge$getWorld();
-        net.minecraft.world.level.block.state.BlockState blockState = Blocks.NETHER_PORTAL.defaultBlockState().setValue(NetherPortalBlock.AXIS, this.axis);
-        BlockPos.betweenClosed(this.bottomLeft, this.bottomLeft.relative(Direction.UP, this.height - 1).relative(this.rightDir, this.width - 1)).forEach((blockPos) -> {
-            blocks.setBlock(blockPos, blockState, 18);
-        });
-        PortalCreateEvent event = new PortalCreateEvent((java.util.List<org.bukkit.block.BlockState>) (java.util.List) this.blocks.getList(), world, null, PortalCreateEvent.CreateReason.FIRE);
-        Bukkit.getPluginManager().callEvent(event);
-        arclight$ret = !event.isCancelled();
-        if (event.isCancelled()) {
-            ci.cancel();
+        if (IWorldBridge.from(this.level) instanceof IWorldBridge bridge) {
+            World world = bridge.bridge$getMinecraftWorld().bridge$getWorld();
+            net.minecraft.world.level.block.state.BlockState blockState = Blocks.NETHER_PORTAL.defaultBlockState().setValue(NetherPortalBlock.AXIS, this.axis);
+            BlockPos.betweenClosed(this.bottomLeft, this.bottomLeft.relative(Direction.UP, this.height - 1).relative(this.rightDir, this.width - 1)).forEach((blockPos) -> {
+                blocks.setBlock(blockPos, blockState, 18);
+            });
+            PortalCreateEvent event = new PortalCreateEvent((java.util.List<org.bukkit.block.BlockState>) (java.util.List) this.blocks.getList(), world, null, PortalCreateEvent.CreateReason.FIRE);
+            Bukkit.getPluginManager().callEvent(event);
+            arclight$ret = !event.isCancelled();
+            if (event.isCancelled()) {
+                ci.cancel();
+            }
         }
     }
 

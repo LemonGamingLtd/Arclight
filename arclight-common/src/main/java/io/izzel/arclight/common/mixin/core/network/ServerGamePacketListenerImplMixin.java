@@ -4,14 +4,14 @@ import com.mojang.brigadier.ParseResults;
 import io.izzel.arclight.common.bridge.core.entity.player.PlayerEntityBridge;
 import io.izzel.arclight.common.bridge.core.entity.player.ServerPlayerEntityBridge;
 import io.izzel.arclight.common.bridge.core.inventory.container.ContainerBridge;
-import io.izzel.arclight.common.bridge.core.network.play.ServerPlayNetHandlerBridge;
+import io.izzel.arclight.common.bridge.core.network.play.ServerGamePacketListenerBridge;
 import io.izzel.arclight.common.bridge.core.network.play.TimestampedPacket;
 import io.izzel.arclight.common.bridge.core.server.MinecraftServerBridge;
 import io.izzel.arclight.common.bridge.core.server.management.PlayerInteractionManagerBridge;
 import io.izzel.arclight.common.bridge.core.server.management.PlayerListBridge;
 import io.izzel.arclight.common.mod.ArclightConstants;
 import io.izzel.arclight.common.mod.server.ArclightServer;
-import io.izzel.arclight.common.mod.server.RunnableInPlace;
+import io.izzel.arclight.common.mod.util.thread.RunnableInPlace;
 import io.izzel.arclight.common.mod.util.ArclightCaptures;
 import io.izzel.arclight.mixin.Decorate;
 import io.izzel.arclight.mixin.DecorationOps;
@@ -139,7 +139,6 @@ import org.bukkit.event.player.PlayerToggleSprintEvent;
 import org.bukkit.inventory.CraftingInventory;
 import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.SmithingInventory;
-import org.objectweb.asm.Opcodes;
 import org.slf4j.Logger;
 import org.spigotmc.SpigotConfig;
 import org.spongepowered.asm.mixin.Final;
@@ -163,11 +162,10 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Function;
 import java.util.logging.Level;
 
 @Mixin(ServerGamePacketListenerImpl.class)
-public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPacketListenerImplMixin implements ServerPlayNetHandlerBridge {
+public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPacketListenerImplMixin implements ServerGamePacketListenerBridge {
 
     // @formatter:off
     @Shadow public ServerPlayer player;
@@ -916,38 +914,26 @@ public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPack
         this.bridge$disconnect("Invalid hotbar selection (Hacking?)");
     }
 
-    /**
-     * @author IzzelAliz
-     * @reason
-     */
-    @Overwrite
-    public void handleChat(ServerboundChatPacket packet) {
-        if (this.server.isStopped()) {
-            return;
+    // InitAuther97: use more compatible injections
+    @Inject(method = "handleChat", cancellable = true, at = @At("HEAD"))
+    private void arclight$skipChatOnShutdown(ServerboundChatPacket serverboundChatPacket, CallbackInfo ci) {
+        if (server.isStopped()) {
+            ci.cancel();
         }
-        Optional<LastSeenMessages> optional = this.unpackAndApplyLastSeen(packet.lastSeenMessages());
-        if (!optional.isEmpty()) {
-            this.tryHandleChat(packet.message(), RunnableInPlace.wrap(() -> {
-                PlayerChatMessage playerchatmessage;
+    }
 
-                try {
-                    playerchatmessage = this.getSignedMessage(packet, optional.get());
-                } catch (SignedMessageChain.DecodeException e) {
-                    this.handleMessageDecodeFailure(e);
-                    return;
-                }
+    @Decorate(method = "handleChat", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/network/ServerGamePacketListenerImpl;tryHandleChat(Ljava/lang/String;Ljava/lang/Runnable;)V"))
+    private void arclight$wrapChatInPlace(ServerGamePacketListenerImpl instance, String string, Runnable runnable) throws Throwable {
+        DecorationOps.callsite().invoke(instance, string, (Runnable) RunnableInPlace.wrap(runnable));
+    }
 
-                CompletableFuture<FilteredText> completablefuture = this.filterTextPacket(playerchatmessage.signedContent()).thenApplyAsync(Function.identity(), ArclightServer.getChatExecutor());
-                var component = bridge$platform$onServerChatSubmitted(this.player, playerchatmessage.decoratedContent());
-
-                this.chatMessageChain.append(completablefuture, (text) -> {
-                        if (component == null) return;
-                        PlayerChatMessage playerchatmessage1 = playerchatmessage.withUnsignedContent(component).filter(completablefuture.join().mask());
-
-                        this.broadcastChatMessage(playerchatmessage1);
-                    }
-                );
-            }));
+    // InitAuther97: don't want to pollute BlockableEventLoop with instanceof check for very rare usages.
+    @Decorate(method = "tryHandleChat", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/MinecraftServer;execute(Ljava/lang/Runnable;)V"))
+    private void arclight$runInPlaceIfPossible(MinecraftServer instance, Runnable runnable) throws Throwable {
+        if (runnable instanceof RunnableInPlace) {
+            runnable.run();
+        } else {
+            DecorationOps.callsite().invoke(instance, runnable);
         }
     }
 
@@ -1253,6 +1239,10 @@ public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPack
             } else if (!this.player.containerMenu.stillValid(this.player)) {
                 LOGGER.debug("Player {} interacted with invalid menu {}", this.player, this.player.containerMenu);
             } else {
+                if (!this.player.containerMenu.isValidSlotIndex(packet.getSlotNum())) {
+                    LOGGER.debug("Player {} clicked invalid slot index {}, available slots: {}", this.player.getName(), packet.getSlotNum(), this.player.containerMenu.slots.size());
+                    return;
+                }
                 boolean flag = packet.getStateId() != this.player.containerMenu.getStateId();
 
                 this.player.containerMenu.suppressRemoteUpdates();
@@ -1261,16 +1251,19 @@ public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPack
                     return;
                 }
 
-                ArclightCaptures.captureContainerOwner(this.player);
-                InventoryView inventory = ((ContainerBridge) this.player.containerMenu).bridge$getBukkitView();
-                ArclightCaptures.resetContainerOwner();
+                ServerPlayer owner = this.player;
+                InventoryView inventory;
+                try {
+                    ArclightCaptures.captureContainerOwner(owner);
+                    inventory = ((ContainerBridge) this.player.containerMenu).bridge$getBukkitView();
+                } finally {
+                    ArclightCaptures.popContainerOwner(owner);
+                }
                 InventoryType.SlotType type = inventory.getSlotType(packet.getSlotNum());
 
                 InventoryClickEvent event;
                 ClickType click = ClickType.UNKNOWN;
                 InventoryAction action = InventoryAction.UNKNOWN;
-
-                ItemStack itemstack = ItemStack.EMPTY;
 
                 switch (packet.getClickType()) {
                     case PICKUP:
@@ -1588,7 +1581,12 @@ public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPack
         if (this.player.gameMode.isCreative()) {
             final boolean flag = packetplayinsetcreativeslot.slotNum() < 0;
             ItemStack itemstack = packetplayinsetcreativeslot.itemStack();
-            CustomData customdata = (CustomData) itemstack.getOrDefault(DataComponents.BLOCK_ENTITY_DATA, CustomData.EMPTY);
+
+            if (!itemstack.isItemEnabled(this.player.level().enabledFeatures())) {
+                return;
+            }
+
+            CustomData customdata = itemstack.getOrDefault(DataComponents.BLOCK_ENTITY_DATA, CustomData.EMPTY);
 
             if (customdata.contains("x") && customdata.contains("y") && customdata.contains("z") && this.player.bridge$getBukkitEntity().hasPermission("minecraft.nbt.copy")) {
                 BlockPos blockpos = BlockEntity.getPosFromTag(customdata.getUnsafe());
@@ -1600,7 +1598,7 @@ public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPack
                 }
             }
             final boolean flag2 = packetplayinsetcreativeslot.slotNum() >= 1 && packetplayinsetcreativeslot.slotNum() <= 45;
-            boolean flag3 = itemstack.isEmpty() || (itemstack.getDamageValue() >= 0 && itemstack.getCount() <= 64 && !itemstack.isEmpty());
+            boolean flag3 = itemstack.isEmpty() || itemstack.getCount() <= itemstack.getMaxStackSize();
             if (flag || (flag2 && !ItemStack.matches(this.player.inventoryMenu.getSlot(packetplayinsetcreativeslot.slotNum()).getItem(), packetplayinsetcreativeslot.itemStack()))) {
                 final InventoryView inventory = ((ContainerBridge) this.player.inventoryMenu).bridge$getBukkitView();
                 final org.bukkit.inventory.ItemStack item = CraftItemStack.asBukkitCopy(packetplayinsetcreativeslot.itemStack());
@@ -1745,5 +1743,30 @@ public abstract class ServerGamePacketListenerImplMixin extends ServerCommonPack
 
     public SocketAddress getRawAddress() {
         return this.connection.channel.remoteAddress();
+    }
+
+    @Override
+    public void arclight$platform$setLastPosX(double d) {
+        lastPosX = d;
+    }
+
+    @Override
+    public void arclight$platform$setLastPosY(double d) {
+        lastPosY = d;
+    }
+
+    @Override
+    public void arclight$platform$setLastPosZ(double d) {
+        lastPosZ = d;
+    }
+
+    @Override
+    public void arclight$platform$setLastPitch(float f) {
+        lastPitch = f;
+    }
+
+    @Override
+    public void arclight$platform$setLastYaw(float f) {
+        lastYaw = f;
     }
 }

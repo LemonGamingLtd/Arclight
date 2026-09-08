@@ -7,6 +7,7 @@ import io.izzel.arclight.common.mod.mixins.annotation.CreateConstructor;
 import io.izzel.arclight.common.mod.mixins.annotation.ShadowConstructor;
 import io.izzel.arclight.common.mod.server.ArclightServer;
 import io.izzel.arclight.common.mod.util.ArclightCaptures;
+import io.izzel.arclight.common.mod.util.PlayerTimeUtil;
 import io.izzel.arclight.mixin.Decorate;
 import io.izzel.arclight.mixin.DecorationOps;
 import net.minecraft.ChatFormatting;
@@ -23,6 +24,7 @@ import net.minecraft.network.protocol.common.ServerboundCustomPayloadPacket;
 import net.minecraft.network.protocol.common.ServerboundResourcePackPacket;
 import net.minecraft.network.protocol.cookie.ServerboundCookieResponsePacket;
 import net.minecraft.network.protocol.game.ClientboundSetDefaultSpawnPositionPacket;
+import net.minecraft.network.protocol.game.ClientboundSetTimePacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -45,6 +47,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Constant;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.ModifyConstant;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.nio.charset.StandardCharsets;
@@ -179,6 +182,17 @@ public abstract class ServerCommonPacketListenerImplMixin implements ServerCommo
         Packet<?> newPacket = new ClientboundDisconnectPacket(textComponent);
         DecorationOps.callsite().invoke(instance, newPacket, packetSendListener);
         this.onDisconnect(disconnectionDetails);
+    }
+
+    @ModifyVariable(method = "send(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketSendListener;)V", at = @At("HEAD"), argsOnly = true, ordinal = 0)
+    private Packet<?> arclight$playerTime(Packet<?> packet) {
+        if (packet instanceof ClientboundSetTimePacket timePacket && this.player != null) {
+            CraftPlayer craftPlayer = this.getCraftPlayer();
+            // Apply Bukkit's per-player time to periodic updates as well as join/world-change updates.
+            return PlayerTimeUtil.personalize(timePacket, craftPlayer.getPlayerTime(),
+                craftPlayer.getPlayerTimeOffset(), craftPlayer.isPlayerTimeRelative());
+        }
+        return packet;
     }
 
     @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketSendListener;)V", cancellable = true, at = @At("HEAD"))
